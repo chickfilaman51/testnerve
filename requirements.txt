@@ -9,3 +9,4 @@ inference
 pandas
 python-dotenv
 pyvips-binary==8.17.2
+streamlit-image-coordinates
