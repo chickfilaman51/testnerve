@@ -193,8 +193,8 @@ if st.session_state.app_step == "select":
     st.write(f"**Image {current_idx + 1} of {len(uploaded_files)}:** `{uploaded_file.name}`")
 
 
-    st.subheader("📍 Select Chiasm Points (Rightmost and Leftmost). The rightmost point should be a bit left to the chiasm, and the leftmost point should be about where the nerve ends.")
-    st.markdown("👉 Click **first** on the rightmost chiasm point, then on the leftmost.")
+    st.subheader("📍 Select Chiasm Points")
+    st.markdown("👉 Click two points on the nerve (order doesn't matter).")
     st.markdown("**Important:** Ensure that the leftmost point does not go beyond the edges of the optic nerve, and leave about 50 pixels of space on the edge of BOTH sides of the nerve in order to avoid errors.")
 
     yellow_mask = st.session_state.yellow_mask
@@ -213,106 +213,63 @@ if st.session_state.app_step == "select":
     if "clicked_points_display" not in st.session_state:
         st.session_state.clicked_points_display = []
 
-    colA, colB = st.columns([1, 1])
-    with colA:
-        use_fallback = st.toggle(
-            "Use reliable click mode (recommended on Streamlit Cloud)",
-            value=True,
-            help="If the drawable canvas background is blank, enable this. It captures clicks directly on the image.",
+    # Always-on reliable click capture (no drawable canvas)
+    if st.button("Reset selected points"):
+        st.session_state.clicked_points_display = []
+        st.session_state.rightmost_point = None
+        st.session_state.leftmost_point = None
+        do_rerun()
+
+    if streamlit_image_coordinates is None:
+        st.error(
+            "`streamlit-image-coordinates` is not installed. "
+            "Add `streamlit-image-coordinates` to requirements.txt and redeploy."
         )
-    with colB:
-        if st.button("Reset selected points"):
-            st.session_state.clicked_points_display = []
-            st.session_state.rightmost_point = None
-            st.session_state.leftmost_point = None
-            do_rerun()
+    else:
+        # Draw any already-selected points onto the image for feedback
+        preview = pil_bg.copy()
+        draw = ImageDraw.Draw(preview)
+        r = 6
+        for (px, py) in st.session_state.clicked_points_display:
+            draw.ellipse((px - r, py - r, px + r, py + r), outline=(0, 255, 255), width=3)
 
-    # === MODE 1 (recommended): image click capture (no canvas) ===
-    if use_fallback:
-        if streamlit_image_coordinates is None:
-            st.error(
-                "`streamlit-image-coordinates` is not installed in this deployment. "
-                "Add `streamlit-image-coordinates` to requirements.txt and redeploy, or turn off click mode to try the canvas." 
-            )
-        else:
-            # Draw any already-selected points onto the image for feedback
-            preview = pil_bg.copy()
-            draw = ImageDraw.Draw(preview)
-            r = 6
-            for (px, py) in st.session_state.clicked_points_display:
-                draw.ellipse((px - r, py - r, px + r, py + r), outline=(0, 255, 255), width=3)
+        click = streamlit_image_coordinates(preview, key=f"img_click_{current_idx}_{filename_base}")
+        if click is not None and "x" in click and "y" in click:
+            x_disp = int(click["x"])
+            y_disp = int(click["y"])
 
-            click = streamlit_image_coordinates(preview, key=f"img_click_{current_idx}_{filename_base}")
-            if click is not None and "x" in click and "y" in click:
-                x_disp = int(click["x"])
-                y_disp = int(click["y"])
-
-                # Only collect the first two clicks
-                if len(st.session_state.clicked_points_display) < 2:
+            # Only collect the first two *distinct* clicks (avoid double-click same spot)
+            if len(st.session_state.clicked_points_display) == 0:
+                st.session_state.clicked_points_display.append((x_disp, y_disp))
+                do_rerun()
+            elif len(st.session_state.clicked_points_display) == 1:
+                lx, ly = st.session_state.clicked_points_display[0]
+                if abs(x_disp - lx) > 2 or abs(y_disp - ly) > 2:
                     st.session_state.clicked_points_display.append((x_disp, y_disp))
                     do_rerun()
 
-            # Convert the 2 selected display points back into original image coords
-            if len(st.session_state.clicked_points_display) >= 2:
-                (x1d, y1d), (x2d, y2d) = st.session_state.clicked_points_display[:2]
+        # Convert the 2 selected display points back into original image coords
+        if len(st.session_state.clicked_points_display) >= 2:
+            (x1d, y1d), (x2d, y2d) = st.session_state.clicked_points_display[:2]
 
-                # Map display->original
-                point1 = (round(x1d / scale_factor), round(y1d / scale_factor))
-                point2 = (round(x2d / scale_factor), round(y2d / scale_factor))
+            # Map display->original
+            p1 = (int(round(x1d / scale_factor)), int(round(y1d / scale_factor)))
+            p2 = (int(round(x2d / scale_factor)), int(round(y2d / scale_factor)))
 
-                st.session_state.rightmost_point = point1
-                st.session_state.leftmost_point = point2
+            # Assign by X so order doesn't matter
+            leftmost = p1 if p1[0] < p2[0] else p2
+            rightmost = p2 if p1[0] < p2[0] else p1
 
-                st.success(f"✅ Rightmost X: {point1[0]}, Leftmost X: {point2[0]}")
+            st.session_state.leftmost_point = leftmost
+            st.session_state.rightmost_point = rightmost
 
-                if st.button("➡️ Next: View Diameter Visualization and Graph"):
-                    st.session_state.app_step = "diameter"
-                    do_rerun()
-            else:
-                st.info("ℹ️ Click two points on the image (first rightmost, then leftmost).")
-
-    # === MODE 2: original drawable canvas (may be blank on some deployments) ===
-    else:
-        # Force the canvas component to fully re-mount when the image changes
-        canvas_key = f"canvas_chiasm_{current_idx}_{filename_base}_{display_width}_{display_height}"
-
-        canvas_result = st_canvas(
-            fill_color="rgba(255, 255, 0, 0.6)",
-            stroke_color="cyan",
-            stroke_width=3,
-            background_image=pil_bg,
-            background_color="#FFFFFF",
-            update_streamlit=True,
-            height=display_height,
-            width=display_width,
-            drawing_mode="point",
-            point_display_radius=8,
-            key=canvas_key,
-        )
-
-        point_radius = 8  # must match point_display_radius in st_canvas
-
-        if canvas_result.json_data is not None and len(canvas_result.json_data.get("objects", [])) >= 2:
-            coords = canvas_result.json_data["objects"]
-            point1 = (
-                round((coords[0]["left"] + point_radius) / scale_factor),
-                round((coords[0]["top"] + point_radius) / scale_factor),
-            )
-            point2 = (
-                round((coords[1]["left"] + point_radius) / scale_factor),
-                round((coords[1]["top"] + point_radius) / scale_factor),
-            )
-
-            st.session_state.rightmost_point = point1
-            st.session_state.leftmost_point = point2
-
-            st.success(f"✅ Rightmost X: {point1[0]}, Leftmost X: {point2[0]}")
+            st.success(f"✅ Leftmost X: {leftmost[0]}, Rightmost X: {rightmost[0]}")
 
             if st.button("➡️ Next: View Diameter Visualization and Graph"):
                 st.session_state.app_step = "diameter"
                 do_rerun()
-        elif canvas_result.json_data is not None:
-            st.info("ℹ️ Click two points on the image (first rightmost, then leftmost).")
+        else:
+            st.info("ℹ️ Click two points on the image.")
 
 
 
