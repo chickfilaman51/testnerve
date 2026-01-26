@@ -1,4 +1,3 @@
-
 import streamlit as st
 import numpy as np
 import cv2
@@ -6,14 +5,19 @@ from inference import get_model
 import supervision as sv
 import os
 import io
-from PIL import Image
+from PIL import Image, ImageDraw
 import matplotlib.pyplot as plt
 from streamlit_drawable_canvas import st_canvas
+try:
+    # Fallback click-capture component that reliably renders images on Streamlit Cloud
+    from streamlit_image_coordinates import streamlit_image_coordinates
+except Exception:
+    streamlit_image_coordinates = None
 from pathlib import Path
 import zipfile
 import shutil
 
-# Load API key from env; keep existing key if set in environment
+
 ROBOFLOW_API_KEY = (
     os.environ.get("ROBOFLOW_API_KEY")
     or st.secrets.get("ROBOFLOW_API_KEY", "")
@@ -203,49 +207,112 @@ if st.session_state.app_step == "select":
     resized = cv2.resize(yellow_mask, (display_width, display_height))
     display_img = cv2.cvtColor(resized, cv2.COLOR_GRAY2RGB)
 
-    # Some deployments (esp. Streamlit Cloud) can fail to render the background image
-    # unless it is explicitly RGBA and the component key changes per image.
-    pil_image = Image.fromarray(display_img).convert("RGBA")
+    pil_bg = Image.fromarray(display_img).convert("RGB")
 
-    # Force the canvas component to fully re-mount when the image changes
-    canvas_key = f"canvas_chiasm_{current_idx}_{filename_base}_{display_width}"
+    # Store clicked points in display-space (canvas/image coords)
+    if "clicked_points_display" not in st.session_state:
+        st.session_state.clicked_points_display = []
 
-    canvas_result = st_canvas(
-        fill_color="rgba(255, 255, 0, 0.6)",
-        stroke_color="cyan",
-        stroke_width=3,
-        background_image=pil_image,
-        background_color="#FFFFFF",
-        update_streamlit=True,
-        height=display_height,
-        width=display_width,
-        drawing_mode="point",
-        point_display_radius=8,
-        key=canvas_key
-    )
-    point_radius = 8  # must match point_display_radius in st_canvas
-
-    if canvas_result.json_data is not None and len(canvas_result.json_data["objects"]) >= 2:
-        coords = canvas_result.json_data["objects"]
-        point1 = (
-            round((coords[0]["left"] + point_radius) / scale_factor),
-            round((coords[0]["top"] + point_radius) / scale_factor)
+    colA, colB = st.columns([1, 1])
+    with colA:
+        use_fallback = st.toggle(
+            "Use reliable click mode (recommended on Streamlit Cloud)",
+            value=True,
+            help="If the drawable canvas background is blank, enable this. It captures clicks directly on the image.",
         )
-        point2 = (
-            round((coords[1]["left"] + point_radius) / scale_factor),
-            round((coords[1]["top"] + point_radius) / scale_factor)
-        )
-
-        st.session_state.rightmost_point = point1
-        st.session_state.leftmost_point = point2
-
-        st.success(f"✅ Rightmost X: {point1[0]}, Leftmost X: {point2[0]}")
-
-        if st.button("➡️ Next: View Diameter Visualization and Graph"):
-            st.session_state.app_step = "diameter"
+    with colB:
+        if st.button("Reset selected points"):
+            st.session_state.clicked_points_display = []
+            st.session_state.rightmost_point = None
+            st.session_state.leftmost_point = None
             do_rerun()
-    elif canvas_result.json_data is not None:
-        st.info("ℹ️ Click two points on the image (first rightmost, then leftmost).")
+
+    # === MODE 1 (recommended): image click capture (no canvas) ===
+    if use_fallback:
+        if streamlit_image_coordinates is None:
+            st.error(
+                "`streamlit-image-coordinates` is not installed in this deployment. "
+                "Add `streamlit-image-coordinates` to requirements.txt and redeploy, or turn off click mode to try the canvas." 
+            )
+        else:
+            # Draw any already-selected points onto the image for feedback
+            preview = pil_bg.copy()
+            draw = ImageDraw.Draw(preview)
+            r = 6
+            for (px, py) in st.session_state.clicked_points_display:
+                draw.ellipse((px - r, py - r, px + r, py + r), outline=(0, 255, 255), width=3)
+
+            click = streamlit_image_coordinates(preview, key=f"img_click_{current_idx}_{filename_base}")
+            if click is not None and "x" in click and "y" in click:
+                x_disp = int(click["x"])
+                y_disp = int(click["y"])
+
+                # Only collect the first two clicks
+                if len(st.session_state.clicked_points_display) < 2:
+                    st.session_state.clicked_points_display.append((x_disp, y_disp))
+                    do_rerun()
+
+            # Convert the 2 selected display points back into original image coords
+            if len(st.session_state.clicked_points_display) >= 2:
+                (x1d, y1d), (x2d, y2d) = st.session_state.clicked_points_display[:2]
+
+                # Map display->original
+                point1 = (round(x1d / scale_factor), round(y1d / scale_factor))
+                point2 = (round(x2d / scale_factor), round(y2d / scale_factor))
+
+                st.session_state.rightmost_point = point1
+                st.session_state.leftmost_point = point2
+
+                st.success(f"✅ Rightmost X: {point1[0]}, Leftmost X: {point2[0]}")
+
+                if st.button("➡️ Next: View Diameter Visualization and Graph"):
+                    st.session_state.app_step = "diameter"
+                    do_rerun()
+            else:
+                st.info("ℹ️ Click two points on the image (first rightmost, then leftmost).")
+
+    # === MODE 2: original drawable canvas (may be blank on some deployments) ===
+    else:
+        # Force the canvas component to fully re-mount when the image changes
+        canvas_key = f"canvas_chiasm_{current_idx}_{filename_base}_{display_width}_{display_height}"
+
+        canvas_result = st_canvas(
+            fill_color="rgba(255, 255, 0, 0.6)",
+            stroke_color="cyan",
+            stroke_width=3,
+            background_image=pil_bg,
+            background_color="#FFFFFF",
+            update_streamlit=True,
+            height=display_height,
+            width=display_width,
+            drawing_mode="point",
+            point_display_radius=8,
+            key=canvas_key,
+        )
+
+        point_radius = 8  # must match point_display_radius in st_canvas
+
+        if canvas_result.json_data is not None and len(canvas_result.json_data.get("objects", [])) >= 2:
+            coords = canvas_result.json_data["objects"]
+            point1 = (
+                round((coords[0]["left"] + point_radius) / scale_factor),
+                round((coords[0]["top"] + point_radius) / scale_factor),
+            )
+            point2 = (
+                round((coords[1]["left"] + point_radius) / scale_factor),
+                round((coords[1]["top"] + point_radius) / scale_factor),
+            )
+
+            st.session_state.rightmost_point = point1
+            st.session_state.leftmost_point = point2
+
+            st.success(f"✅ Rightmost X: {point1[0]}, Leftmost X: {point2[0]}")
+
+            if st.button("➡️ Next: View Diameter Visualization and Graph"):
+                st.session_state.app_step = "diameter"
+                do_rerun()
+        elif canvas_result.json_data is not None:
+            st.info("ℹ️ Click two points on the image (first rightmost, then leftmost).")
 
 
 
@@ -897,4 +964,3 @@ if st.session_state.app_step == "diameter":
                 file_name="all_nerve_diameters.zip",
                 mime="application/zip"
             )
-
