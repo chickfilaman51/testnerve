@@ -14,8 +14,10 @@ import shutil
 
 
 # Load API key from env; keep existing key if set in environment
-ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY", "")
-
+ROBOFLOW_API_KEY = (
+    os.environ.get("ROBOFLOW_API_KEY")
+    or st.secrets.get("ROBOFLOW_API_KEY", "")
+)
 # Compatible rerun helper for old/new Streamlit
 def do_rerun():
     if hasattr(st, "rerun"):
