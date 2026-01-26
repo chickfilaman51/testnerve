@@ -1,3 +1,4 @@
+
 import streamlit as st
 import numpy as np
 import cv2
@@ -11,7 +12,6 @@ from streamlit_drawable_canvas import st_canvas
 from pathlib import Path
 import zipfile
 import shutil
-
 
 # Load API key from env; keep existing key if set in environment
 ROBOFLOW_API_KEY = (
@@ -202,19 +202,26 @@ if st.session_state.app_step == "select":
 
     resized = cv2.resize(yellow_mask, (display_width, display_height))
     display_img = cv2.cvtColor(resized, cv2.COLOR_GRAY2RGB)
-    pil_image = Image.fromarray(display_img)
+
+    # Some deployments (esp. Streamlit Cloud) can fail to render the background image
+    # unless it is explicitly RGBA and the component key changes per image.
+    pil_image = Image.fromarray(display_img).convert("RGBA")
+
+    # Force the canvas component to fully re-mount when the image changes
+    canvas_key = f"canvas_chiasm_{current_idx}_{filename_base}_{display_width}"
 
     canvas_result = st_canvas(
         fill_color="rgba(255, 255, 0, 0.6)",
         stroke_color="cyan",
         stroke_width=3,
         background_image=pil_image,
+        background_color="#FFFFFF",
         update_streamlit=True,
         height=display_height,
         width=display_width,
         drawing_mode="point",
         point_display_radius=8,
-        key="canvas_chiasm"
+        key=canvas_key
     )
     point_radius = 8  # must match point_display_radius in st_canvas
 
@@ -890,3 +897,4 @@ if st.session_state.app_step == "diameter":
                 file_name="all_nerve_diameters.zip",
                 mime="application/zip"
             )
+
