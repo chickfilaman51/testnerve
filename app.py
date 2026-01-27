@@ -209,9 +209,17 @@ if st.session_state.app_step == "select":
 
     pil_bg = Image.fromarray(display_img).convert("RGB")
 
-    # Store clicked points in display-space (canvas/image coords)
+    # Store clicked points in display-space (image coords)
     if "clicked_points_display" not in st.session_state:
         st.session_state.clicked_points_display = []
+
+    # Reset points automatically when switching to a new image
+    current_image_key = f"{current_idx}_{filename_base}"
+    if st.session_state.get("_last_select_image_key") != current_image_key:
+        st.session_state.clicked_points_display = []
+        st.session_state.rightmost_point = None
+        st.session_state.leftmost_point = None
+        st.session_state._last_select_image_key = current_image_key
 
     # Always-on reliable click capture (no drawable canvas)
     if st.button("Reset selected points"):
