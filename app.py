@@ -66,7 +66,7 @@ if "sampling_radius" not in st.session_state:
     st.session_state["sampling_radius"] = 30
 
 
-st.title("🧠 Optic Nerve Mask Segmentation")
+st.title("🧠 Optic Nerve Mask Segmentatione")
 
 
 if st.session_state.app_step == "upload":
