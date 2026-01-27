@@ -66,7 +66,7 @@ if "sampling_radius" not in st.session_state:
     st.session_state["sampling_radius"] = 30
 
 
-st.title("🧠 Optic Nerve Mask Segmentatione")
+st.title("🧠 Optic Nerve Mask Segmentation")
 
 
 if st.session_state.app_step == "upload":
@@ -204,17 +204,22 @@ if st.session_state.app_step == "select":
     scale_factor = display_width / orig_w
     display_height = int(orig_h * scale_factor)
 
-    resized = cv2.resize(yellow_mask, (display_width, display_height))
-    display_img = cv2.cvtColor(resized, cv2.COLOR_GRAY2RGB)
+    # Cache the resized display image per image so click reruns are faster
+    current_image_key = f"{current_idx}_{filename_base}"
+    display_cache_key = f"_display_pil_bg_{current_image_key}_{display_width}"
 
-    pil_bg = Image.fromarray(display_img).convert("RGB")
+    if st.session_state.get(display_cache_key) is None:
+        resized = cv2.resize(yellow_mask, (display_width, display_height))
+        display_img = cv2.cvtColor(resized, cv2.COLOR_GRAY2RGB)
+        st.session_state[display_cache_key] = Image.fromarray(display_img).convert("RGB")
+
+    pil_bg = st.session_state[display_cache_key]
 
     # Store clicked points in display-space (image coords)
     if "clicked_points_display" not in st.session_state:
         st.session_state.clicked_points_display = []
 
     # Reset points automatically when switching to a new image
-    current_image_key = f"{current_idx}_{filename_base}"
     if st.session_state.get("_last_select_image_key") != current_image_key:
         st.session_state.clicked_points_display = []
         st.session_state.rightmost_point = None
