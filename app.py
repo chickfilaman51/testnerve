@@ -36,7 +36,7 @@ def load_model():
     if not key:
         st.error("Missing ROBOFLOW_API_KEY.")
         st.stop()
-    return get_model(model_id="mouse-optic-nerve-uktj7/6", api_key=key)
+    return get_model(model_id="mouse-optic-nerve-uktj7/10", api_key=key)
 
 model = load_model()
 
